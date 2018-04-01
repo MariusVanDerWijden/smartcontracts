@@ -33,6 +33,7 @@ contract FundScience {
                 require(papers[i].percentageOfHundred <= 100);
                 uint eth = (papers[i].percentageOfHundred * msg.value) / 100;
                 value -= eth;
+                require(value > 0);
                 FundScience tmp = FundScience(papers[i].paperAddress);
                 tmp.sendEther.value(eth)();
             }
