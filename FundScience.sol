@@ -24,11 +24,11 @@ contract FundScience {
     function addPaper(paper newPaper) public{
         require(msg.sender == owner);
         require(newPaper.percentageOfHundred <= 100);
-        require(paperValid);
+        require(paperValid(newPaper));
         papers.push(newPaper);
     }
 
-    function paperValid(paper newPaper) view returns (bool valid){
+    function paperValid(paper newPaper)public view returns (bool valid){
         uint percentage = newPaper.percentageOfHundred;
         for(uint i = 0; i < papers.length; i++){
             percentage += papers[i].percentageOfHundred;
