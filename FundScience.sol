@@ -23,21 +23,29 @@ contract FundScience {
 
     function addPaper(paper newPaper) public{
         require(msg.sender == owner);
+        require(newPaper.percentageOfHundred <= 100);
+        require(paperValid);
         papers.push(newPaper);
     }
 
-    function sendEther() public payable {
+    function paperValid(paper newPaper) view returns (bool valid){
+        uint percentage = newPaper.percentageOfHundred;
+        for(uint i = 0; i < papers.length; i++){
+            percentage += papers[i].percentageOfHundred;
+        }
+        return percentage <= 100;
+    }
+
+    function () public payable {
         uint value = msg.value;
         if(value > negligible){
             for(uint i = 0; i < papers.length; i++){
-                require(papers[i].percentageOfHundred <= 100);
                 uint eth = (papers[i].percentageOfHundred * msg.value) / 100;
                 value -= eth;
                 require(value > 0);
-                FundScience tmp = FundScience(papers[i].paperAddress);
-                tmp.sendEther.value(eth)();
+                papers[i].paperAddress.send(eth);
             }
         }
-        owner.transfer(value);
+        owner.send(value);
     }
 }
