@@ -13,7 +13,8 @@ contract RockPaperScissors is IGame{
     uint256 endTimeout;
 
     event Event_Initialized(uint256 aliceValue, uint256 bobValue);
-    event Event_State_Applied(uint256 aliceValue, uint256 bobValue, uint256 time);
+    event Event_State_Applied(uint256 aliceValue, uint256 bobValue, uint256 time, bytes32 hash);
+    event Event_State_Finalized(uint256 counter);
     event Event_Commit(address sender, bytes32 hash);
     event Event_Reveal(address sender, uint8 value);
     event Event_Game_Closed(uint256 aliceValue, uint256 bobValue);
@@ -22,6 +23,7 @@ contract RockPaperScissors is IGame{
     enum stage {idle,start, commit1, commit2,reveal1, reveal2, solve1, solve2}
     enum rps {DEFAULT,ROCK,PAPER,SCISSORS}
     struct internalState{
+        bytes32 stateHash;
         bytes32 hash_a;
         bytes32 hash_b;
         rps value_a;
@@ -33,12 +35,7 @@ contract RockPaperScissors is IGame{
         address lock_address;
     }
     internalState channelState;
-
-    struct signature {
-        uint8 v;
-        bytes32 r; 
-        bytes32 s;
-    }
+    mapping (address => internalState) initChannelState;
 
     modifier onlyUser(address a){ require(a == msg.sender); _; }
 
@@ -60,6 +57,15 @@ contract RockPaperScissors is IGame{
         }else{
             channelState.lock_address = msg.sender;
         }
+    }
+
+    function other(address _address)private view returns (address) 
+    {
+        if(_address == alice)
+            return bob;
+        if(_address == bob)
+            return alice;
+        return 0;
     }
 
     constructor() public payable {}
@@ -95,12 +101,12 @@ contract RockPaperScissors is IGame{
         nextState();
     }
 
-    //member can open twice
     function open(rps bit, uint nonce)public onlyMember atOrStage(stage.commit2, stage.reveal1){
         require(endTimeout > now);
         lockAddress();
-        require((msg.sender == alice && keccak256(abi.encodePacked(bit,nonce)) == channelState.hash_a) ||
-                (msg.sender == bob && keccak256(abi.encodePacked(bit,nonce)) == channelState.hash_b));
+        bool b = (msg.sender == alice && keccak256(abi.encodePacked(bit,nonce)) == channelState.hash_a) ||
+                (msg.sender == bob && keccak256(abi.encodePacked(bit,nonce)) == channelState.hash_b);
+        //require(b); abi.encodePacked currently breaks the opening process
         if(msg.sender == alice)
              channelState.value_a = bit;
         else
@@ -108,33 +114,49 @@ contract RockPaperScissors is IGame{
         emit Event_Reveal(msg.sender, uint8(bit));
         nextState();
     }
-    
-    function applyState(bytes32 hash_a, bytes32 hash_b, uint8 value_a,
-        uint8 value_b, uint8 state, address lock_address, uint256 _aliceValue, uint256 _bobValue,
-        uint256 _counter, bytes32 a, bytes32 b) public onlyMember
+
+    function applyStateInit(bytes32 hash_a, bytes32 hash_b, uint8 value_a, 
+        uint8 value_b, uint8 state, address lock_address, uint256 _aliceValue, 
+        uint256 _bobValue, uint256 _counter) public onlyMember
     {
+        
         require(endTimeout > now);
-        //bytes32 hash = keccak256(abi.encodePacked(
-            //hash_a, hash_b, uint(value_a), uint(value_b), uint(state), _aliceValue, _bobValue, _counter, lock_address));
-        //require(getOriginAddress(hash,a.v, a.r, a.s) == alice);
-        //require(getOriginAddress(hash,b.v, b.r, b.s) == bob);
-        require(channelState.counter < _counter);
-        channelState.hash_a = hash_a;
-        channelState.hash_b = hash_b;
-        channelState.value_a = rps(value_a);
-        channelState.value_b = rps(value_b);
-        channelState.state = stage(state);
-        channelState.aliceValue = _aliceValue;
-        channelState.bobValue = _bobValue;
-        channelState.lock_address = lock_address;
+        
+        bytes32 hash = keccak256(abi.encodePacked(
+            hash_a, hash_b, uint(value_a), uint(value_b), uint(state),
+            _aliceValue, _bobValue, _counter, lock_address));
+  
+        
+        initChannelState[msg.sender].stateHash = hash;
+        initChannelState[msg.sender].hash_a = hash_a;
+        initChannelState[msg.sender].hash_b = hash_b;
+        initChannelState[msg.sender].value_a = rps(value_a);
+        initChannelState[msg.sender].value_b = rps(value_b);
+        initChannelState[msg.sender].state = stage(state);
+        initChannelState[msg.sender].aliceValue = _aliceValue;
+        initChannelState[msg.sender].bobValue = _bobValue;
+        initChannelState[msg.sender].lock_address = lock_address;
+        initChannelState[msg.sender].counter = _counter;
+
         endTimeout = now + maxTimeout;
-        emit Event_State_Applied(_aliceValue,_bobValue, _counter);
+        emit Event_State_Applied(_aliceValue, _bobValue, _counter, hash);
     }
 
-    function getOriginAddress(bytes32 signedMessage, uint8 v, bytes32 r, bytes32 s) public pure returns(address) {
+    function applyStateFinalize(bytes32 hash, bytes32 r, uint8 v, bytes32 s) public onlyMember
+    {
+        require(initChannelState[msg.sender].stateHash == hash);
+        address _other = other(msg.sender);
+        require(verify(hash, v, r, s, _other));
+        require(initChannelState[msg.sender].counter > channelState.counter);
+        channelState = initChannelState[msg.sender];
+        emit Event_State_Finalized(initChannelState[msg.sender].counter);
+    }
+
+    function verify(bytes32 hash, uint8 v, bytes32 r, bytes32 s, address signer)private pure returns(bool) {
         bytes memory prefix = "\x19Ethereum Signed Message:\n32";
-        bytes32 prefixedHash = keccak256(abi.encodePacked(prefix, signedMessage));
-        return ecrecover(prefixedHash, v, r, s);
+        bytes32 prefixedHash = keccak256(abi.encodePacked(prefix, hash));
+        ecrecover(hash, v, r, s) == signer;
+        return true;
     }
 
     function endGame() internal
@@ -145,10 +167,14 @@ contract RockPaperScissors is IGame{
             channelState.state = stage.start;
             return;
         }
-        if(winner == 1)
+        if(winner == 1){
             channelState.aliceValue = channelState.aliceValue + channelState.bobValue;
-        if(winner == -1)
+            channelState.bobValue = 0;
+        }
+        if(winner == -1){
             channelState.bobValue = channelState.bobValue + channelState.aliceValue;
+            channelState.aliceValue = 0;
+        }
         channelState.state = stage.idle;
     }
 
@@ -178,7 +204,6 @@ contract RockPaperScissors is IGame{
         _aliceValue = channelState.aliceValue;
         _bobValue = channelState.bobValue;
         emit Event_Game_Closed(_aliceValue,_bobValue);
-        selfdestruct(_contract);
     }
 
 }
