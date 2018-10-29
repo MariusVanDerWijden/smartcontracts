@@ -5,9 +5,11 @@
 
 pragma solidity ^0.4.21;
 
+import "./ISecureStorage.sol";
+
 contract ExchangeContract{
 
-	enum State {PROPOSED,ACCEPTED,DISPUTE,CLOSED}
+	enum State {PROPOSED,ACCEPTED,CLOSED}
 
 	struct ExchangeState {
 		address alice;
@@ -15,10 +17,11 @@ contract ExchangeContract{
 		uint256 aliceValue;
 		uint256 bobValue;
 		byte[] firstHalfKeys; //the first half of the key, encrypted with bob's pk
-		byte32[] firstHalfHashes;
-		byte32[] secondHalfKeys;
-		address[] valueAddresses;
-		State state = State.CLOSED;
+		bytes32[] firstHalfHashes; //the hash of the first half
+		bytes32[] secondHalfKeys; //the second half of the key
+		address storageAddress; //the addresses where the data can be found
+		uint[] dataCells; //the dataCells of the data
+		State state;
 		uint256 timeout;
     }
 	uint constant maxTimeout = 10 seconds;
@@ -46,7 +49,7 @@ contract ExchangeContract{
     	_;
     }
 
-	constructor()
+	constructor() public
 	{
 		emit Exchange_Opened();
 		openExchanges = 0;
@@ -55,16 +58,18 @@ contract ExchangeContract{
 	function proposeExchange (
 		uint256 exchangeID, 
 		address _bob, 
-		address[] _valueAddresses, 
+		address _storageAddress,
+		uint[] _dataCells,
 		byte[] _firstHalfKeys,
-		byte32[] _firstHalfHashes
+		bytes32[] _firstHalfHashes
 	)
 		inState(exchangeID, State.CLOSED) public payable
 	{
 		exchanges[exchangeID].alice = msg.sender;
 		exchanges[exchangeID].aliceValue = msg.value;
 		exchanges[exchangeID].bob = _bob;
-		exchanges[exchangeID].valueAddresses = _valueAddresses;
+		exchanges[exchangeID].storageAddress = _storageAddress;
+		exchanges[exchangeID].dataCells = _dataCells;
 		exchanges[exchangeID].firstHalfKeys = _firstHalfKeys;
 		exchanges[exchangeID].firstHalfHashes = _firstHalfHashes;
 		exchanges[exchangeID].state = State.PROPOSED;
@@ -75,7 +80,7 @@ contract ExchangeContract{
 
 	function acceptExchange (
 		uint256 exchangeID, 
-		byte32[] _secondHalfKeys
+		bytes32[] _secondHalfKeys
 	) 
 		onlyUser(exchanges[exchangeID].bob) 
 		inState(exchangeID, State.PROPOSED) public payable
@@ -91,7 +96,8 @@ contract ExchangeContract{
 
 	function finishExchange (
 		uint256 exchangeID
-	)
+	)   
+	    public
 		inState(exchangeID, State.ACCEPTED)
 	{
 		require(now > exchanges[exchangeID].timeout);
@@ -105,6 +111,7 @@ contract ExchangeContract{
 	function timeoutExchange (
 		uint256 exchangeID
 	)
+	    public
 		onlyUser(exchanges[exchangeID].alice) 
 		inState(exchangeID, State.PROPOSED)
 	{
@@ -118,15 +125,21 @@ contract ExchangeContract{
 	function disputeExchange(
 		uint256 exchangeID,
 		uint256 keyID,
-		byte32 firstKeyHalf
+		bytes32 firstKeyHalf
 	)
+	    public
 		onlyUser(exchanges[exchangeID].alice)
 		inState(exchangeID, State.ACCEPTED)
 	{
 		require(now > exchanges[exchangeID].timeout);
-		require(keccak256(firstKeyHalf) = exchanges[exchangeID].firstHalfHashes[keyID]);
-		byte32 key = firstKeyHalf ^ secondHalfKeys[keyID];
-		bool valid = exchanges[exchangeID].valueAddresses[keyID].valid(key);
+		require(keccak256(abi.encodePacked(firstKeyHalf)) 
+		    == exchanges[exchangeID].firstHalfHashes[keyID]);
+		bytes32 key = firstKeyHalf ^ exchanges[exchangeID].secondHalfKeys[keyID];
+		ISecureStorage store = ISecureStorage(exchanges[exchangeID].storageAddress);
+		bool valid = store.valid(
+			exchanges[exchangeID].bob, 
+			exchanges[exchangeID].dataCells[keyID],
+			key);
 		exchanges[exchangeID].state = State.CLOSED;
 		uint256 value = exchanges[exchangeID].bobValue + exchanges[exchangeID].aliceValue;
 		if(valid) //key was a valid key for the value -> alice cheated
@@ -144,7 +157,7 @@ contract ExchangeContract{
 
 	function close() public onlyUser(owner)
 	{
-		require(openExchanges = 0);
+		require(openExchanges == 0);
 		selfdestruct(owner);
 		emit Event_Selfdestruct();
 	}
