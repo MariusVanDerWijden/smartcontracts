@@ -51,59 +51,59 @@ contract EnergyDeliveryContract {
         uint40 closingDate; // not set if contract is open
     }
     
-    legalContract lc;
+    mapping(uint256 => legalContract) lc;
     
-    function propose(entity memory deliverer, entity memory other, entity memory arbitrator, offer memory consideration) public {
-        require(lc.state == contractState.NIL);
+    function propose(uint256 id, entity memory deliverer, entity memory other, entity memory arbitrator, offer memory consideration) public {
+        require(lc[id].state == contractState.NIL);
         require(deliverer.recAddress == msg.sender);
         require(consideration.amount * consideration.pricePerKwH == consideration.fullPrice);
-        lc.arbitrator = arbitrator;
-        lc.parties[0] = deliverer;
-        lc.parties[1] = other;
-        lc.consideration = consideration;
-        lc.state = contractState.OFFER;
+        lc[id].arbitrator = arbitrator;
+        lc[id].parties[0] = deliverer;
+        lc[id].parties[1] = other;
+        lc[id].consideration = consideration;
+        lc[id].state = contractState.OFFER;
+    }
+
+    function accept(uint256 id) public payable {
+        require(msg.sender == lc[id].parties[1].recAddress);
+        require(lc[id].state == contractState.OFFER);
+        require(msg.value == lc[id].consideration.fullPrice);
+        if (lc[id].parties[1].typename == enityTaxonomy.HUMAN) 
+            require(lc[id].parties[1].additionalAttributes.age > 18);
+        advanceState(id);
     }
     
-    function accept() public payable {
-        require(msg.sender == lc.parties[1].recAddress);
-        require(lc.state == contractState.OFFER);
-        require(msg.value == lc.consideration.fullPrice);
-        if (lc.parties[1].typename == enityTaxonomy.HUMAN) 
-            require(lc.parties[1].additionalAttributes.age > 18);
-        advanceState();
+    function delivered(uint256 id) inState(id, contractState.CONSIDERATION) public {
+        require(msg.sender == lc[id].arbitrator.recAddress);
+        lc[id].deliveryDate = uint40(now);
+        lc[id].terminationDate = uint40(now + 10 days);
+        advanceState(id);
     }
     
-    function delivered() inState(contractState.CONSIDERATION) public {
-        require(msg.sender == lc.arbitrator.recAddress);
-        lc.deliveryDate = uint40(now);
-        lc.terminationDate = uint40(now + 10 days);
-        advanceState();
-    }
-    
-    function terminate() inState(contractState.DELIVERED) public {
-        require(now > lc.terminationDate);
+    function terminate(uint256 id) inState(id, contractState.DELIVERED) public {
+        require(now > lc[id].terminationDate);
         // prevent reentrency
-        advanceState(); 
-        payout();
-        lc.closingDate = uint40(1);
+        advanceState(id); 
+        payout(id);
+        lc[id].closingDate = uint40(1);
     }
     
-    function advanceState() internal {
-        lc.state = contractState(uint(lc.state) + 1);
+    function advanceState(uint256 id) internal {
+        lc[id].state = contractState(uint(lc[id].state) + 1);
     }
     
-    function payout() inState(contractState.TERMINATED) internal {
-        address payable addr  = address( uint160(lc.parties[0].recAddress));
-        addr.transfer(lc.consideration.fullPrice);
+    function payout(uint256 id) inState(id, contractState.TERMINATED) internal {
+        address payable addr  = address( uint160(lc[id].parties[0].recAddress));
+        addr.transfer(lc[id].consideration.fullPrice);
     }
     
-    modifier onlyParty() {
-        require(lc.parties[0].recAddress == msg.sender || lc.parties[1].recAddress == msg.sender);
+    modifier onlyParty(uint256 id) {
+        require(lc[id].parties[0].recAddress == msg.sender || lc[id].parties[1].recAddress == msg.sender);
         _;
     }
     
-    modifier inState(contractState state) {
-        require(lc.state == state);
+    modifier inState(uint256 id, contractState state) {
+        require(lc[id].state == state);
         _;
     }
 }
