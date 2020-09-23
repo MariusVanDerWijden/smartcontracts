@@ -1,6 +1,6 @@
-pragma solidity >= 0.6.0;
+pragma solidity >= 0.7.0;
 
-import "https://github.com/OpenZeppelin/openzeppelin-contracts/contracts/cryptography/ECDSA.sol";
+import "./ECDSA.sol";
 import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/proxy/Proxy.sol";
 
 contract RelayContract is Proxy {
@@ -19,6 +19,10 @@ contract RelayContract is Proxy {
     // Fields for vote
     uint256 timeout;
     address proposedContract;
+    
+    constructor(address ctr) public {
+        currentContract = ctr;
+    }
     
     modifier afterTimeout() {
         require(block.timestamp >= timeout, "Can only be executed after timeout");
@@ -77,7 +81,7 @@ contract RelayContract is Proxy {
     
     // reset resets all votes
     function reset() private {
-        // invalidate all votes
+        // invalidate all votes for the next round.
         for(uint256 i = 0; i < users.length; i++){
             delete users[i].signature;
         }
@@ -109,9 +113,9 @@ contract RelayContract is Proxy {
     
     // verifySig verifies a signature on a message.
     function verifySig(bytes memory message, address signer, bytes memory signature) private pure returns (bool) {
-		bytes32 prefixedHash = ECDSA.toEthSignedMessageHash(keccak256(message));
-		address recoveredAddr = ECDSA.recover(prefixedHash, signature);
-		return recoveredAddr == signer;
+        bytes32 prefixedHash = ECDSA.toEthSignedMessageHash(keccak256(message));
+        address recoveredAddr = ECDSA.recover(prefixedHash, signature);
+        return recoveredAddr == signer;
     }
     
 }
