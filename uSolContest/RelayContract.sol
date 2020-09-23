@@ -1,7 +1,7 @@
 pragma solidity >= 0.7.0;
 
 import "./ECDSA.sol";
-import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/proxy/Proxy.sol";
+import "./Proxy.sol";
 
 contract RelayContract is Proxy {
     
