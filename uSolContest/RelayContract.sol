@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 pragma solidity >= 0.7.0;
 
 import "./ECDSA.sol";
@@ -20,7 +22,7 @@ contract RelayContract is Proxy {
     uint256 timeout;
     address proposedContract;
     
-    constructor(address ctr) public {
+    constructor(address ctr) {
         currentContract = ctr;
     }
     
